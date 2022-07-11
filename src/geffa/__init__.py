@@ -1,0 +1,1 @@
+from .geffa import GffFile
