@@ -193,6 +193,14 @@ class ExonDoesNotContainCDSCompletely(Issue):
     def __message__(self):
         return f'CDS extends beyond the range of the exon.'
 
+class CDSOverlap(Issue):
+    def __init__(self, node, other):
+        super().__init__(node)
+        self.other = other
+    
+    def __message__(self):
+        return f'CDS overlaps another CDS {self.other.attributes["ID"]}.'    
+
 class Node:
     def __init__(self, line_nr, sequence_region, source, entry_type, start, end, score, strand, phase, attributes, *args, **kwargs):
         start = int(start)
@@ -501,6 +509,13 @@ class SequenceRegion:
         for node in self.node_registry.values():
             if node.type == 'gene':
                 node._validate()
+
+        CDSs = sorted([entry for entry in self.node_registry.values() if entry.type == 'CDS'], key=lambda CDS: CDS.start)
+        for i, CDS1 in enumerate(CDSs):
+            for CDS2 in CDSs[i+1:]:
+                if (CDS1.end >= CDS2.start):
+                    CDS1.issues.append(CDSOverlap(CDS1, CDS2))
+                    CDS2.issues.append(CDSOverlap(CDS2, CDS1))
     
     def add_node(self, node):
         if node.attributes['ID'] in self.node_registry:
