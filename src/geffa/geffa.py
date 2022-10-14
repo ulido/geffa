@@ -735,7 +735,7 @@ class GffFile:
                     if (len(seqreg.node_registry) == 0) or (seqreg.sequence is None):
                         continue
                     seq = str(seqreg.sequence)
-                    f.write(f'> {seqreg.name}\n')
+                    f.write(f'>{seqreg.name}\n')
                     for i in range(0, len(seq)+1, 80):
                         f.write(seq[i:i+80] + '\n')
     
