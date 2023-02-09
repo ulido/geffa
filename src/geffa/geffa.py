@@ -1,5 +1,6 @@
 import re
 from collections import defaultdict
+import bisect
 import logging
 import textwrap
 
@@ -666,6 +667,29 @@ class SequenceRegion:
             seq = str(self.sequence)
             new_seq = seq[:start-1] + seq[end+1:]
             self.sequence = Seq(new_seq)
+
+    def closest_node_of_type(self, node, node_types, direction='both'):
+        '''Return the closest node of the specified type(s) in the specified direction.
+        Please note that the direction is reversed if the given node's strand is '-'.
+        '''
+        if not node_types:
+            type_filter_func = lambda x: True
+        if not isinstance(node_types, list):
+            node_types = [node_types]
+            type_filter_func = lambda x: x.type in node_types
+        
+        nodes = sorted([feature for feature in self.node_registry.values() if type_filter_func(feature)], key=lambda x: x.start)
+        if node.strand == '-':
+            nodes = nodes[::-1]
+        if direction == 'forward' or direction == 'both':
+            idx_fwd = bisect.bisect_right(nodes, node, key=lambda x: x.start)
+        else:
+            idx_fwd = None
+        if direction == 'backward' or direction == 'both':
+            idx_back = bisect.bisect_left(nodes, node, key=lambda x: x.start)
+        else:
+            idx_back = None
+        return sorted([nodes[i] for i in (idx_fwd, idx_back) if i is not None], key=lambda x: abs(node.start - x.start))
 
     def __str__(self):
         return f'##sequence-region\t{self.name}\t{self.start}\t{self.end}'
