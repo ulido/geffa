@@ -597,6 +597,18 @@ class PASNode(Node):
             if p.type != 'gene':
                 raise ValueError('PAS parent needs to be gene')
 
+class STARTNode(Node):
+    type = 'START'
+    toplevel = True
+    def validate(self):
+        pass
+
+class STOPNode(Node):
+    type = 'STOP'
+    toplevel = True
+    def validate(self):
+        pass
+
 _gap_re = re.compile('NNN+')  # Gaps are at least 3 Ns
 class SequenceRegion:
     def __init__(self, name, start, end, sequence=None):
