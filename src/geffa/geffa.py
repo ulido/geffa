@@ -5,7 +5,7 @@ import logging
 _TRANSLATION_TABLE = str.maketrans('ACTG', 'TGAC')
 class Seq(str):
     def reverse_complement(self):
-        return self[::-1].translate(_TRANSLATION_TABLE)
+        return Seq(self[::-1].translate(_TRANSLATION_TABLE))
 
     def __getitem__(self, *args, **kwargs):
         return Seq(super().__getitem__(*args, **kwargs))
