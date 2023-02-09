@@ -669,18 +669,24 @@ def _parse_fasta(txt):
     return contigs
 
 class GffFile:
-    def __init__(self, gff_file, fasta_file=None, postpone_validation=False):
+    def __init__(self, gff_file=None, fasta_file=None, postpone_validation=True, ignore_unknown_feature_types=False):
         if fasta_file is not None:
             self._contigs = _read_fasta_file(fasta_file)
         else:
             self._contigs = {}
 
-        self._read_gff_file(gff_file)
+        if gff_file is not None:
+            self._read_gff_file(gff_file, ignore_unknown_feature_types)
+        else:
+            self.sequence_regions = self._generate_seqregs()
 
         if not postpone_validation:
             self.validate()
     
-    def _read_gff_file(self, filename):
+    def _generate_seqregs(self):
+        return {name: SequenceRegion(name, 1, len(sequence)+1, sequence) for name, sequence in self._contigs.items()}
+
+    def _read_gff_file(self, filename, ignore_unknown_feature_types):
         header_lines = []
         GFF_lines = []
 
@@ -706,7 +712,7 @@ class GffFile:
                 else:
                     self._contigs.update(_parse_fasta(f.read()))
 
-        seqregs = {name: SequenceRegion(name, 1, len(sequence)+1, sequence) for name, sequence in self._contigs.items()}
+        seqregs = self._generate_seqregs()
         for line in header_lines:
             split = re.split('\s+', line)
             if split[0] == '##sequence-region':
@@ -732,8 +738,11 @@ class GffFile:
                 raise ValueError(f'Unknown sequence region ID on line nr {line_nr}.')
             try:
                 node = next(subclass for subclass in Node.__subclasses__() if subclass.type == entry_type)(line_nr+1, seqreg, *splits[1:])
-            except:
-                raise Exception(f'Exception raised on line nr {line_nr}.')
+            except Exception as e:
+                if ignore_unknown_feature_types:
+                    print(f"Warning, exception {e} raised.")
+                else:
+                    raise Exception(f'Exception raised on line nr {line_nr}.')
 
         self.sequence_regions = seqregs
 
@@ -832,4 +841,3 @@ class GffFile:
                     f.write(f'>{seqreg.name}\n')
                     for i in range(0, len(seq)+1, 80):
                         f.write(seq[i:i+80] + '\n')
-    
