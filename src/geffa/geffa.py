@@ -314,6 +314,9 @@ class Node:
                 p.children.append(self)
                 if self.strand != p.strand:
                     raise ValueError(f"Strand is different between parent and child at line nr {self.line_nr}.")
+        elif not self.toplevel:
+            raise ValueError(f'Node has no parent but cannot be top level either on line {self.line_nr}')
+
         self.sequence_region.add_node(self)
 
     @property
@@ -373,6 +376,7 @@ class Node:
 
 class GeneNode(Node):
     type = 'gene'
+    toplevel = True
     def validate(self):
         if self.type != 'gene':
             raise ValueError(f'GeneNode called with wrong type "{self.type}"')
@@ -391,6 +395,7 @@ class GeneNode(Node):
 
 class MRNANode(Node):
     type = 'mRNA'
+    toplevel = False
     def validate(self):
         if self.phase != '.':
             raise ValueError('Phase needs to be "." for mRNA.')
@@ -475,6 +480,7 @@ class MRNANode(Node):
 
 class NcRNANode(Node):
     type = 'ncRNA'
+    toplevel = False
     def validate(self):
         if self.phase != '.':
             raise ValueError('Phase needs to be "." for ncRNA.')
@@ -485,6 +491,7 @@ class NcRNANode(Node):
 
 class RRNANode(Node):
     type = 'rRNA'
+    toplevel = False
     def validate(self):
         if self.phase != '.':
             raise ValueError('Phase needs to be "." for rRNA.')
@@ -495,6 +502,7 @@ class RRNANode(Node):
 
 class TRNANode(Node):
     type = 'tRNA'
+    toplevel = False
     def validate(self):
         if self.phase != '.':
             raise ValueError('Phase needs to be "." for tRNA.')
@@ -505,6 +513,7 @@ class TRNANode(Node):
 
 class ExonNode(Node):
     type = 'exon'
+    toplevel = False
     def validate(self):
         if self.phase != '.':
             raise ValueError('Phase needs to be "." for exon.')
@@ -519,6 +528,7 @@ class ExonNode(Node):
 
 class ThreePrimeUTRNode(Node):
     type = 'three_prime_UTR'
+    toplevel = False
     def validate(self):
         if self.phase != '.':
             raise ValueError('Phase needs to be "." for three_prime_UTR.')
@@ -529,6 +539,7 @@ class ThreePrimeUTRNode(Node):
 
 class FivePrimeUTRNode(Node):
     type = 'five_prime_UTR'
+    toplevel = False
     def validate(self):
         if self.phase != '.':
             raise ValueError('Phase needs to be "." for five_prime_UTR.')
@@ -539,6 +550,7 @@ class FivePrimeUTRNode(Node):
 
 class CDSNode(Node):
     type = 'CDS'
+    toplevel = False
     def validate(self):
         if self.phase not in [0, 1, 2]:
             raise ValueError('Phase needs to be 0, 1 or 2 for CDS.')
@@ -555,6 +567,7 @@ class CDSNode(Node):
 
 class SLASNode(Node):
     type = 'SLAS'
+    toplevel = True
     def validate(self):
         for p in self.parents:
             if p.type != 'gene':
@@ -562,6 +575,7 @@ class SLASNode(Node):
 
 class PASNode(Node):
     type = 'PAS'
+    toplevel = True
     def validate(self):
         for p in self.parents:
             if p.type != 'gene':
@@ -801,9 +815,9 @@ class GffFile:
 '''
         header += self._sequence_region_header()
         body = ''
-        for seqreg in self.sequence_regions.values():
-            for gene in (entry for entry in seqreg.node_registry.values() if entry.type == 'gene'):
-                body += '###\n' + str(gene) + '\n'
+        for _, seqreg in sorted(self.sequence_regions.items(), key=lambda x: x[0]):
+            for feature in sorted((entry for entry in seqreg.node_registry.values() if entry.toplevel and not entry.parents), key=lambda x: int(x.start)):
+                body += '###\n' + str(feature) + '\n'
         return header + body
 
     def save(self, filename, include_sequences=False):
