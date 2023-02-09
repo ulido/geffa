@@ -1,6 +1,7 @@
 import re
 from collections import defaultdict
 import logging
+import textwrap
 
 _TRANSLATION_TABLE = str.maketrans('ACTG', 'TGAC')
 class Seq(str):
@@ -12,6 +13,75 @@ class Seq(str):
 
 START_CODONS = ['TTG', 'CTG', 'ATG']
 STOP_CODONS = ['TAA', 'TAG', 'TGA']
+
+CODON_TRANSLATION_TABLE = {
+        "TTT": "F",
+        "TTC": "F",
+        "TTA": "L",
+        "TTG": "L",
+        "TCT": "S",
+        "TCC": "S",
+        "TCA": "S",
+        "TCG": "S",
+        "TAT": "Y",
+        "TAC": "Y",
+        "TAA": "X",
+        "TAG": "X",
+        "TGT": "C",
+        "TGC": "C",
+        "TGA": "X",
+        "TGG": "W",
+        "CTT": "L",
+        "CTC": "L",
+        "CTA": "L",
+        "CTG": "L",
+        "CCT": "P",
+        "CCC": "P",
+        "CCA": "P",
+        "CCG": "P",
+        "CAT": "H",
+        "CAC": "H",
+        "CAA": "Q",
+        "CAG": "Q",
+        "CGT": "R",
+        "CGC": "R",
+        "CGA": "R",
+        "CGG": "R",
+        "ATT": "I",
+        "ATC": "I",
+        "ATA": "I",
+        "ATG": "M",
+        "ACT": "T",
+        "ACC": "T",
+        "ACA": "T",
+        "ACG": "T",
+        "AAT": "N",
+        "AAC": "N",
+        "AAA": "K",
+        "AAG": "K",
+        "AGT": "S",
+        "AGC": "S",
+        "AGA": "R",
+        "AGG": "R",
+        "GTT": "V",
+        "GTC": "V",
+        "GTA": "V",
+        "GTG": "V",
+        "GCT": "A",
+        "GCC": "A",
+        "GCA": "A",
+        "GCG": "A",
+        "GAT": "D",
+        "GAC": "D",
+        "GAA": "E",
+        "GAG": "E",
+        "GGT": "G",
+        "GGC": "G",
+        "GGA": "G",
+        "GGG": "G",
+}
+for stop_codon in STOP_CODONS:
+    CODON_TRANSLATION_TABLE[stop_codon] = '*'
 
 logger = logging.getLogger('parseGFF3')
 
@@ -388,6 +458,16 @@ class MRNANode(Node):
         if (len(CDSs) == 0) or (self.sequence_region.sequence is None):
             return None
         return Seq(''.join([str(CDS.sequence) for CDS in CDSs]))
+    
+    def protein_sequence(self):
+        coding_sequence = self.coding_sequence()
+        protein_sequence = ""
+        for codon in textwrap.wrap(coding_sequence, 3):
+            try:
+                protein_sequence += CODON_TRANSLATION_TABLE[codon]
+            except KeyError:
+                protein_sequence += 'X'
+        return protein_sequence
 
     def extend_coordinates(self, new_start=None, new_end=None):
         super().extend_coordinates(new_start, new_end)
