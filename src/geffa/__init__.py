@@ -1,1 +1,1 @@
-from .geffa import GffFile
+from .geffa import GffFile, STOP_CODONS, START_CODONS
