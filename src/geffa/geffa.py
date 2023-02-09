@@ -362,6 +362,9 @@ class Node:
         for child in self.children:
             entries.append(str(child))
         return '\n'.join(entries)
+    
+    def __repr__(self):
+        return f'{self.type} {self.strand}[{self.start}, {self.end}]'
 
     def apply_recursively(self, func):
         for child in self.children:
@@ -373,6 +376,18 @@ class Node:
             self.start = min(self.start, new_start)
         if new_end is not None:
             self.end = max(self.end, new_end)
+
+    def to_dict(self):
+        return {
+            'type': self.type,
+            'start': self.start,
+            'end': self.end,
+            'phase': self.phase,
+            'strand': self.strand,
+            'score': self.score,
+            'attributes': self.attributes,
+            'sequence_region': self.sequence_region.name,
+        }
 
 class GeneNode(Node):
     type = 'gene'
