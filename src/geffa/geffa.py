@@ -863,6 +863,14 @@ class GffFile:
                     report += str(issue) + '\n'
 
         return report
+    
+    def merge(self, gff: GffFile):
+        srnames_this: set[str] = set(self.sequence_regions)
+        srnames_other: set[str] = set(gff.sequence_regions)
+        if srnames_this.intersection(srnames_other):
+            raise ValueError('Unable to merge because the given GffFile object contains sequence region names that overlap with existing sequence region names.')
+        self._contigs.update(gff._contigs)
+        self.sequence_regions.update(gff.sequence_regions)
 
     def __getitem__(self, key: str) -> Node:
         for seqreg in self.sequence_regions.values():
