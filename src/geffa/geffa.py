@@ -335,6 +335,9 @@ class Node:
             seq = seq.reverse_complement()
 
         return seq
+    
+    def __len__(self) -> int:
+        return self.end - self.start + 1
 
     def _validate(self) -> None:
         self.issues = []
