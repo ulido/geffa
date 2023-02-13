@@ -783,7 +783,7 @@ class GffFile:
                 if name in seqregs:
                     seqreg: SequenceRegion = seqregs[name]
                     if (int(start) != seqreg.start) or (int(end) != seqreg.end):
-                        raise ValueError('FASTA and GFF disagree on start or end of sequence region')
+                        ValueError(f'FASTA and GFF disagree on start or end of sequence region {name} - start {start} vs {seqreg.start} and end {end} vs {seqreg.end}')
                 else:
                     seqregs[split[1]] = SequenceRegion(split[1], int(split[2]), int(split[3]), None)
 
