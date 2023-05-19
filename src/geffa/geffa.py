@@ -314,7 +314,7 @@ class Node:
                 try:
                     self.parents.append(self.sequence_region.node_registry[pid])
                 except KeyError:
-                    raise ValueError(f'Invalid parent ID at line nr {self.line_nr}')
+                    raise ValueError(f'Invalid parent ID {pid} at line nr {self.line_nr}')
             for p in self.parents:
                 p.children.append(self)
                 if self.strand != p.strand:
@@ -396,6 +396,14 @@ class Node:
             'attributes': self.attributes,
             'sequence_region': self.sequence_region.name,
         }
+
+class GenericNode(Node):
+    type: str = '__generic__'
+    toplevel: bool = True
+    # This is only used if `ignore_unknown_feature_types` is enabled
+    def __init__(self, line_nr, sequence_region, source, entry_type, start, end, score, strand, phase, attributes, *args, **kwargs) -> None:
+        self.type = entry_type
+        super().__init__(line_nr, sequence_region, source, entry_type, start, end, score, strand, phase, attributes, *args, **kwargs)
 
 class GeneNode(Node):
     type: str = 'gene'
@@ -804,11 +812,13 @@ class GffFile:
                 raise ValueError(f'Unknown sequence region ID on line nr {line_nr}.')
             try:
                 node: Node = next(subclass for subclass in Node.__subclasses__() if subclass.type == entry_type)(line_nr+1, seqreg, *splits[1:])
-            except Exception as e:
+            except StopIteration as e:
                 if ignore_unknown_feature_types:
-                    print(f"Warning, exception {e} raised.")
+                    node: Node = GenericNode(line_nr+1, seqreg, *splits[1:])
                 else:
-                    raise Exception(f'Exception raised on line nr {line_nr}.')
+                    raise ValueError(f'Unknown feature type {entry_type} on line nr {line_nr}.')
+            except Exception as e:
+                raise Exception(f'Exception raised on line nr {line_nr}.')
 
         self.sequence_regions = seqregs
 
