@@ -5,19 +5,26 @@ from collections import defaultdict
 import bisect
 import logging
 import textwrap
+import pathlib
 
 import typing
 
+# Translation table helps to create the reverse complement
 _TRANSLATION_TABLE: dict[int, int | None] = str.maketrans('ACTG', 'TGAC')
 class Seq(str):
+    """Sequence class to hold nucleotide sequence"""
     def reverse_complement(self) -> Seq:
+        """Return the reverse complement of the given sequence"""
         return Seq(self[::-1].translate(_TRANSLATION_TABLE))
 
     def __getitem__(self, *args, **kwargs) -> Seq:
         return Seq(super().__getitem__(*args, **kwargs))
 
 START_CODONS: list[str] = ['TTG', 'CTG', 'ATG']
+"""List of start codons"""
+
 STOP_CODONS: list[str] = ['TAA', 'TAG', 'TGA']
+"""List of stop codons"""
 
 CODON_TRANSLATION_TABLE: dict[str, str] = {
         "TTT": "F",
@@ -85,31 +92,37 @@ CODON_TRANSLATION_TABLE: dict[str, str] = {
         "GGA": "G",
         "GGG": "G",
 }
+"""Table to translate between nucleotide triplets and amino acids."""
 for stop_codon in STOP_CODONS:
     CODON_TRANSLATION_TABLE[stop_codon] = '*'
 
 logger: logging.Logger = logging.getLogger('parseGFF3')
 
 class RevalidationNecessary(Exception):
+    """Exception raised to trigger revalidation of the GFF"""
     pass
 
 class Issue:
+    """Base type for an issue found within the GFF file. Cannot be used as is, needs to be subclassed."""
     def __init__(self, node) -> None:
         self.node = node
 
     def fix(self) -> None:
+        """Implement to fix the raised issue (if possible)."""
         raise NotImplementedError
 
     def _debug_log_msg(self, msg) -> None:
         logger.debug(f'{self.node.attributes["ID"]}: {msg}')
 
     def __message__(self) -> str:
+        """Implement to display an informative issue message."""
         raise NotImplementedError
 
     def __str__(self) -> str:
         return f'Issue with {self.node.type} {self.node.attributes["ID"]} (line {self.node.line_nr}): {self.__message__()}'
     
 class FeatureStartLeftOfSequenceRegionStart(Issue):
+    """Invoked when a gene or gene feature has a start index smaller than the start of the sequence region it belongs to."""
     def fix(self) -> None:
         self.node.start = self.node.sequence_region.start
         logger.debug('Truncating gene to the start of the sequence region.')
@@ -119,6 +132,7 @@ class FeatureStartLeftOfSequenceRegionStart(Issue):
         return f'Feature start ({self.node.start}) is to the left of the start of the containing sequence region ({self.node.sequence_region.name}: {self.node.sequence_region.start}'
 
 class FeatureEndRightOfSequenceRegionEnd(Issue):
+    """Invoked when a gene or gene feature has an end index beyond the end of the sequence region it belongs to."""
     def fix(self) -> None:
         self.node.end = self.node.sequence_region.end
         logger.debug('Truncating gene to the end of the sequence region.')
@@ -128,6 +142,7 @@ class FeatureEndRightOfSequenceRegionEnd(Issue):
         return f'Feature end ({self.node.end}) is to the right of the end of the containing sequence region ({self.node.sequence_region.name}: {self.node.sequence_region.end}'
 
 class FeatureStartLeftOfParentIssue(Issue):
+    """Invoked when a gene or gene feature has a start index smaller than the start of its parent."""
     def __init__(self, node, parent) -> None:
         super().__init__(node)
         self.parent = parent
@@ -141,6 +156,7 @@ class FeatureStartLeftOfParentIssue(Issue):
         return f'Feature start ({self.node.start}) is to the left of one of its parents ({self.parent.start}).'
 
 class FeatureEndRightOfParentIssue(Issue):
+    """Invoked when a gene or gene feature has an end index beyong the end of its parent."""
     def __init__(self, node, parent) -> None:
         super().__init__(node)
         self.parent = parent
@@ -154,6 +170,7 @@ class FeatureEndRightOfParentIssue(Issue):
         return f'Feature end ({self.node.end}) is to the right of one of its parents ({self.parent.end}).'
 
 class CDSPhaseIncorrectIssue(Issue):
+    """Invoked when the recorded CDS phase differs from the calculated phase."""
     def __init__(self, node, correct_phase) -> None:
         super().__init__(node)
         self.correct_phase = correct_phase
@@ -172,6 +189,9 @@ class CDSPhaseIncorrectIssue(Issue):
         return f'CDS phase ({self.node.phase}) should be {self.correct_phase}{can_be_ignored}.'
 
 class CodingSequenceStartIsNotStartCodon(Issue):
+    """Invoked when a CDS does not start with a start codon.
+    
+    The fix is to mark the parent gene as a pseudogene."""
     def __message__(self) -> str:
         return f'Coding sequence does not start with a start codon.'
 
@@ -181,6 +201,10 @@ class CodingSequenceStartIsNotStartCodon(Issue):
         raise RevalidationNecessary()
 
 class CodingSequenceEndIsNotStopCodon(Issue):
+    """Invoked when a CDS does not end with a stop codon.
+    
+    When fixing, the algorithm tries to find a stop codon within 30nt of the end of the CDS.
+    If that cannot be found, the gene will be marked as a pseudogene, unless the CDS contains internal stop codons."""
     def __message__(self) -> str:
         return f'Coding sequence does not end with a stop codon.'
 
@@ -220,6 +244,10 @@ class CodingSequenceEndIsNotStopCodon(Issue):
                 self._debug_log_msg('No stop codon found, but holding off on marking gene as pseudo because there are internal stop codons present.')
 
 class CodingSequenceContainsInternalStopCodons(Issue):
+    """Invoked when a CDS contains internal stop codons.
+    
+    When fixing, the algorithm truncates the CDS to the first internal stop codon, unless the CDS length would shrink by more than 10%.
+    In that case, the gene is marked as a pseudogene."""
     def fix(self):
         coding_sequence = self.node.coding_sequence()
         stop_codon_presence = [str(coding_sequence[i:i+3]) in STOP_CODONS for i in range(0, len(coding_sequence)-3, 3)]
@@ -251,6 +279,9 @@ class CodingSequenceContainsInternalStopCodons(Issue):
         return f'Coding sequence contains internal stop codons.'
 
 class ExonDoesNotContainCDSCompletely(Issue):
+    """Invoked when a CDS extends beyond its containing exon.
+    
+    When fixing, the exon's coordinates are extended to contain the CDS fully."""
     def __init__(self, node, CDS):
         super().__init__(node)
         self.CDS = CDS
@@ -269,6 +300,7 @@ class ExonDoesNotContainCDSCompletely(Issue):
         return f'CDS extends beyond the range of the exon.'
 
 class CDSOverlap(Issue):
+    """Invoked when two CDSs are overlapping. No automatic fix available."""
     def __init__(self, node, other):
         super().__init__(node)
         self.other = other
@@ -277,7 +309,32 @@ class CDSOverlap(Issue):
         return f'CDS overlaps another CDS {self.other.attributes["ID"]}.'    
 
 class Node:
-    def __init__(self, line_nr, sequence_region, source, entry_type, start, end, score, strand, phase, attributes, *args, **kwargs) -> None:
+    """Base class of a GFF Node"""
+    def __init__(
+            self,
+            line_nr: int,
+            sequence_region: SequenceRegion,
+            source: str,
+            entry_type: str,
+            start: int | str,
+            end: int | str,
+            score: int | str,
+            strand: str,
+            phase: int | str,
+            attributes: str,
+            *args, **kwargs) -> None:
+        """Initialise a GFF Node
+        
+        Arguments:
+        line_nr -- the line number the `Node` is defined at in the GFF file
+        sequence_region -- the `SequenceRegion` the `Node` belongs to
+        source -- the source specifier from the line in the GFF file
+        entry_type -- the type of `Node`
+        start -- the start coordinate of the `Node`
+        end -- the end coordinate of the `Node`
+        score -- the score value of the `Node`
+        phase -- the phase value of the `Node`
+        """
         start: int = int(start)
         end: int = int(end)
         if start > end:
@@ -309,8 +366,10 @@ class Node:
 
         self.children: list[Node] = []
         self.parents: list[Node] = []
+        # Assign parents
         if 'Parent' in self.attributes:
             for pid in self.attributes['Parent'].split(','):
+                # This assumes that any parents are already read in - should be though because they need to be listed before any children.
                 try:
                     self.parents.append(self.sequence_region.node_registry[pid])
                 except KeyError:
@@ -326,6 +385,7 @@ class Node:
 
     @property
     def sequence(self) -> Seq | None:
+        """The nucleotide sequence of the feature (if the sequence region's sequence is available, otherwise `None`)."""
         region_seq: Seq | None = self.sequence_region.sequence
         if region_seq is None:
             return None
@@ -337,9 +397,11 @@ class Node:
         return seq
     
     def __len__(self) -> int:
+        """Length (in nucleotides) of the feature."""
         return self.end - self.start + 1
 
     def _validate(self) -> None:
+        # Run validation on this node and its children.
         self.issues = []
         self._validate_start_end()
         self.validate()
@@ -347,6 +409,7 @@ class Node:
             child._validate()
 
     def _validate_start_end(self) -> None:
+        # Validate that the start and end of this feature is within the bounds of its parents and the sequence region
         for p in self.parents:
             if self.start < p.start:
                 self.issues.append(FeatureStartLeftOfParentIssue(self, p))
@@ -358,6 +421,7 @@ class Node:
             self.issues.append(FeatureEndRightOfSequenceRegionEnd(self))
 
     def delete(self) -> None:
+        """Delete the feature node and any of its children."""
         for child in list(self.children):
             child.delete()
         for p in self.parents:
@@ -375,17 +439,32 @@ class Node:
         return f'{self.type} {self.strand}[{self.start}, {self.end}]'
 
     def apply_recursively(self, func: typing.Callable[[Node], typing.Any]):
+        """Apply the given function recursively to the node and its children.
+        
+        This is done depth-first, meaning any children are iterated over first.
+
+        Arguments
+        func -- function to apply (needs to take the `Node` as a single argument, return is ignored)"""
         for child in self.children:
             child.apply_recursively(func)
         return func(self)
 
     def extend_coordinates(self, new_start=None, new_end=None) -> None:
+        """Extend the start and stop coordinates of the feature to the given coordinates.
+        
+        Crucially, this only allows extending, a feature cannot be shrunk this way (i.e. the new start cannot be to the right of the original).
+
+        Arguments
+        new_start -- new start coordinate (default `None`)
+        new_end -- new end coordintate (default `None`)
+        """
         if new_start is not None:
             self.start = min(self.start, new_start)
         if new_end is not None:
             self.end = max(self.end, new_end)
 
     def to_dict(self) -> dict[str, typing.Any]:
+        """Returns a `dict` containing the feature parameters."""
         return {
             'type': self.type,
             'start': self.start,
@@ -398,7 +477,9 @@ class Node:
         }
 
 class GenericNode(Node):
+    """A catch-all node type used if `ignore_unknown_feature_types=True`."""
     type: str = '__generic__'
+    # The node can be top level.
     toplevel: bool = True
     # This is only used if `ignore_unknown_feature_types` is enabled
     def __init__(self, line_nr, sequence_region, source, entry_type, start, end, score, strand, phase, attributes, *args, **kwargs) -> None:
@@ -406,9 +487,11 @@ class GenericNode(Node):
         super().__init__(line_nr, sequence_region, source, entry_type, start, end, score, strand, phase, attributes, *args, **kwargs)
 
 class GeneNode(Node):
+    """Node type describing a gene feature."""
     type: str = 'gene'
     toplevel: bool = True
     def validate(self) -> None:
+        """Validate the gene node."""
         if self.type != 'gene':
             raise ValueError(f'GeneNode called with wrong type "{self.type}"')
         if self.phase != '.':
@@ -417,6 +500,13 @@ class GeneNode(Node):
             raise ValueError('"Parent" attribute does not make sense for gene.')
 
     def mark_as_pseudo(self, reason='unknown') -> None:
+        """This marks the gene feature as a pseudo gene.
+        
+        It will delete any CDS, 3'UTR and 5'UTR features found in any mRNA child features.
+
+        Arguments
+        reason -- text describing the reason for marking as a pseudogene (default "unknown")
+        """
         self.attributes['pseudogene'] = reason
         for child in self.children:
             if child.type == 'mRNA':
@@ -425,9 +515,14 @@ class GeneNode(Node):
                         grandchild.delete()
 
 class MRNANode(Node):
+    """Node type describing an mRNA feature."""
     type: str = 'mRNA'
     toplevel: bool = False
     def validate(self) -> None:
+        """Validate the mRNA node.
+        
+        This does basic consistence checks on the metadata, checks if the CDS starts with a start codon, ends with a stop codon and has no internal stop codons.
+        It also checks if the exons cover the CDSs completely."""
         if self.phase != '.':
             raise ValueError('Phase needs to be "." for mRNA.')
 
@@ -437,7 +532,7 @@ class MRNANode(Node):
         if self.parents[0].type != 'gene':
             raise ValueError('mRNA parent needs to be gene')
 
-        # Validate phases
+        # Validate CDS child feature phases
         CDSs: list[Node] = self.CDS_children()
         if len(CDSs) > 0:
             phases = self.calculate_CDS_phases()
@@ -445,6 +540,8 @@ class MRNANode(Node):
                 if p != CDS.phase:
                     self.issues.append(CDSPhaseIncorrectIssue(CDS, p))
 
+        # Validate start / stop codon presence and positon.
+        # Only done when the coding sequence is available.
         seq: Seq | None = self.coding_sequence()
         if seq is not None:
             first_codon: Seq = seq[:3]
@@ -454,12 +551,14 @@ class MRNANode(Node):
             if last_codon not in STOP_CODONS:
                 self.issues.append(CodingSequenceEndIsNotStopCodon(self))
 
+            # Check for internal stop codons
             codons: list[str] = [str(seq[i:i+3]) for i in range(0, len(seq)-3, 3)]
             for stop_codon in STOP_CODONS:
                 if stop_codon in codons:
                     self.issues.append(CodingSequenceContainsInternalStopCodons(self))
                     break
 
+        # Checks if the exon child features cover the contained CDSs completely.
         exons: list[Node] = [child for child in self.children if child.type == 'exon']
         for exon in exons:
             for CDS in CDSs:
@@ -468,6 +567,7 @@ class MRNANode(Node):
                     self.issues.append(ExonDoesNotContainCDSCompletely(exon, CDS))
 
     def calculate_CDS_phases(self) -> list[int]:
+        """Calculates the phase values for all CDS child features."""
         CDSs: list[Node] = self.CDS_children()
         if len(CDSs) == 0:
             return []
@@ -484,18 +584,21 @@ class MRNANode(Node):
         return phases
 
     def CDS_children(self) -> list[Node]:
+        """Returns a sorted list of CDS child features."""
         CDSs: list[Node] = sorted([child for child in self.children if child.type == 'CDS'], key=lambda c: c.start)
         if self.strand == '-':
             CDSs.reverse()
         return CDSs
 
     def coding_sequence(self, extend_start_bps=0, extend_end_bps=0) -> Seq | None:
+        """Returns the nucleotide coding sequence covered by the contained CDSs."""
         CDSs: list[Node] = self.CDS_children()
         if (len(CDSs) == 0) or (self.sequence_region.sequence is None):
             return None
         return Seq(''.join([str(CDS.sequence) for CDS in CDSs]))
     
     def protein_sequence(self) -> str | None:
+        """Returns the amino acid sequence corresponding to the mRNA's coding sequence."""
         coding_sequence: Seq | None = self.coding_sequence()
         if coding_sequence is None:
             return None
@@ -508,13 +611,24 @@ class MRNANode(Node):
         return protein_sequence
 
     def extend_coordinates(self, new_start=None, new_end=None) -> None:
+        """Extend the start and stop coordinates of the feature to the given coordinates.
+        
+        Crucially, this only allows extending, a feature cannot be shrunk this way (i.e. the new start cannot be to the right of the original).
+        It also extends the parent's coordinates.
+
+        Arguments
+        new_start -- new start coordinate (default `None`)
+        new_end -- new end coordintate (default `None`)
+        """
         super().extend_coordinates(new_start, new_end)
         self.parents[0].extend_coordinates(new_start, new_end)
 
 class NcRNANode(Node):
+    """Node type describing a non-coding RNA feature."""
     type: str = 'ncRNA'
     toplevel: bool = False
     def validate(self) -> None:
+        """Validate the ncRNA feature."""
         if self.phase != '.':
             raise ValueError('Phase needs to be "." for ncRNA.')
 
@@ -523,9 +637,11 @@ class NcRNANode(Node):
                 raise ValueError('ncRNA parent needs to be gene')
 
 class RRNANode(Node):
+    """Node type describing a ribosomal RNA feature."""
     type: str = 'rRNA'
     toplevel: bool = False
     def validate(self) -> None:
+        """Validate the rRNA feature."""
         if self.phase != '.':
             raise ValueError('Phase needs to be "." for rRNA.')
 
@@ -534,9 +650,11 @@ class RRNANode(Node):
                 raise ValueError('rRNA parent needs to be gene')
 
 class TRNANode(Node):
+    """Node type describing a t-RNA feature."""
     type: str = 'tRNA'
     toplevel: bool = False
     def validate(self) -> None:
+        """Validate the t-RNA feature."""
         if self.phase != '.':
             raise ValueError('Phase needs to be "." for tRNA.')
 
@@ -545,9 +663,11 @@ class TRNANode(Node):
                 raise ValueError('tRNA parent needs to be gene')
 
 class ExonNode(Node):
+    """Node type describing an exon."""
     type: str = 'exon'
     toplevel: bool = False
     def validate(self) -> None:
+        """Validate the exon feature."""
         if self.phase != '.':
             raise ValueError('Phase needs to be "." for exon.')
 
@@ -556,13 +676,24 @@ class ExonNode(Node):
                 raise ValueError('Exon parent needs to be an RNA')
 
     def extend_coordinates(self, new_start=None, new_end=None) -> None:
+        """Extend the start and stop coordinates of the feature to the given coordinates.
+        
+        Crucially, this only allows extending, a feature cannot be shrunk this way (i.e. the new start cannot be to the right of the original).
+        It also extends the parent's coordinates.
+
+        Arguments
+        new_start -- new start coordinate (default `None`)
+        new_end -- new end coordintate (default `None`)
+        """
         super().extend_coordinates(new_start, new_end)
         self.parents[0].extend_coordinates(new_start, new_end)
 
 class ThreePrimeUTRNode(Node):
+    """Node type describing a 3' untranslated region (UTR)."""
     type: str = 'three_prime_UTR'
     toplevel: bool = False
     def validate(self) -> None:
+        """Validate the 3'UTR feature."""
         if self.phase != '.':
             raise ValueError('Phase needs to be "." for three_prime_UTR.')
 
@@ -571,9 +702,11 @@ class ThreePrimeUTRNode(Node):
                 raise ValueError('three_prime_UTR parent needs to be mRNA')
 
 class FivePrimeUTRNode(Node):
+    """Node type describing a 5' untranslated region (UTR)."""
     type: str = 'five_prime_UTR'
     toplevel: bool = False
     def validate(self) -> None:
+        """Validate the 5'UTR feature."""
         if self.phase != '.':
             raise ValueError('Phase needs to be "." for five_prime_UTR.')
 
@@ -582,9 +715,11 @@ class FivePrimeUTRNode(Node):
                 raise ValueError('five_prime_UTR parent needs to be mRNA')
 
 class CDSNode(Node):
+    """Node type describing a coding sequence feature."""
     type: str = 'CDS'
     toplevel: bool = False
     def validate(self) -> None:
+        """Validate the CDS feature."""
         if self.phase not in [0, 1, 2]:
             raise ValueError('Phase needs to be 0, 1 or 2 for CDS.')
 
@@ -595,40 +730,66 @@ class CDSNode(Node):
             raise ValueError('CDS parent needs to be mRNA')
 
     def extend_coordinates(self, new_start=None, new_end=None) -> None:
+        """Extend the start and stop coordinates of the feature to the given coordinates.
+        
+        Crucially, this only allows extending, a feature cannot be shrunk this way (i.e. the new start cannot be to the right of the original).
+        It also extends the parent's coordinates.
+
+        Arguments
+        new_start -- new start coordinate (default `None`)
+        new_end -- new end coordintate (default `None`)
+        """
         super().extend_coordinates(new_start, new_end)
         self.parents[0].extend_coordinates(new_start, new_end)
 
 class SLASNode(Node):
+    """Node type describing a splice leader acceptor site."""
     type: str = 'SLAS'
     toplevel: bool = True
     def validate(self) -> None:
+        """Validate a SLAS feature."""
         for p in self.parents:
             if p.type != 'gene':
                 raise ValueError('SLAS parent needs to be gene')
 
 class PASNode(Node):
+    """Node type describing a poly-adenylation site."""
     type: str = 'PAS'
     toplevel: bool = True
     def validate(self) -> None:
+        """Validate the PAS feature."""
         for p in self.parents:
             if p.type != 'gene':
                 raise ValueError('PAS parent needs to be gene')
 
 class STARTNode(Node):
+    """Node type describing a start codon site."""
     type: str = 'START'
     toplevel: bool = True
     def validate(self) -> None:
+        # TODO: Validate that this actually is the site of a start codon if sequence is present.
         pass
 
 class STOPNode(Node):
+    """Node type describing a stop codon site."""
     type: str = 'STOP'
     toplevel: bool = True
     def validate(self) -> None:
+        # TODO: Validate that this actually is the site of a start codon if sequence is present.
         pass
 
+# Regular expression to check for gaps.
 _gap_re: typing.Pattern[str] = re.compile('NNN+')  # Gaps are at least 3 Ns
 class SequenceRegion:
+    """Describes a sequence region (or contig)."""
     def __init__(self, name: str, start: int, end: int, sequence=None) -> None:
+        """Initialize the sequence region.
+        
+        Arguments
+        name -- Name of the contig (no spaces allowed)
+        start -- Start coordinate of the contig.
+        end -- End coordinate of the contig.
+        sequence -- Nucleotide sequence of the contig."""
         if (not issubclass(type(name), str)) or (name == '') or (' ' in name):
             raise ValueError('Name needs to be a valid string without spaces')
         if start > end:
@@ -645,10 +806,12 @@ class SequenceRegion:
         self.node_registry: dict[str, Node] = {}
 
     def validate(self) -> None:
+        """Validate the sequence region and all the feature nodes it contains. Checks for CDS feature overlaps."""
         for node in self.node_registry.values():
             if node.type == 'gene':
                 node._validate()
 
+        # Check for CDS overlaps
         CDSs: list = sorted([entry for entry in self.node_registry.values() if entry.type == 'CDS'], key=lambda CDS: CDS.start)
         for i, CDS1 in enumerate(CDSs):
             for CDS2 in CDSs[i+1:]:
@@ -656,7 +819,8 @@ class SequenceRegion:
                     CDS1.issues.append(CDSOverlap(CDS1, CDS2))
                     CDS2.issues.append(CDSOverlap(CDS2, CDS1))
     
-    def add_node(self, node) -> None:
+    def add_node(self, node: Node) -> None:
+        """Add a given node."""
         if node.attributes['ID'] in self.node_registry:
             raise ValueError(f'Node with ID "{node.attributes["ID"]}" already exists in node registry!')
         if node.sequence_region != self:
@@ -667,6 +831,12 @@ class SequenceRegion:
         self.node_registry[node.attributes["ID"]] = node
 
     def trim_sequence(self, start, end, delete_overlapping_features=True) -> None:
+        """Trim the sequence region to the given coordinates.
+        
+        Arguments
+        start -- Trim to this start position
+        end -- Trim to this end position
+        delete_overlapping_features -- Allow deletion of features that overlap the new sequence region boundaries."""
         logger.debug(f'{self.name}: Trimming sequence region.')
         overlapping_features: list[Node] = [
             node for node in self.node_registry.values()
@@ -678,6 +848,7 @@ class SequenceRegion:
             raise NotImplementedError()
         overlapping_genes: list = []
         # BUG!!!!
+        # This isn't currently being used to delete any genes, there is a bug!
         def recursively_find_gene(node) -> None:
             if node.type == 'gene':
                 overlapping_features.add(node)
@@ -708,8 +879,10 @@ class SequenceRegion:
                 node_types: list[str] = [node_types]
             type_filter_func = lambda x: x.type in node_types
         
+        # Get a list of all nodes of the given type(s) in the sequence region, sorted by the start cordinate.
         nodes: list[Node] = sorted([feature for feature in self.node_registry.values() if type_filter_func(feature)], key=lambda x: x.start)
         if node.strand == '-':
+            # NOTE: This works well if we don't have overlapping features. If we do, then the behavior is somewhat undefined!
             nodes = nodes[::-1]
         if direction == 'forward' or direction == 'both':
             idx_fwd: int = bisect.bisect_right(nodes, node, key=lambda x: x.start)
@@ -724,12 +897,14 @@ class SequenceRegion:
     def __str__(self) -> str:
         return f'##sequence-region\t{self.name}\t{self.start}\t{self.end}'
 
-def _read_fasta_file(filename) -> dict[str, Seq]:
+def _read_fasta_file(filename: pathlib.Path | str) -> dict[str, Seq]:
+    # Open and read the given FASTA file
     with open(filename, 'r') as f:
         txt: str = f.read()
     return _parse_fasta(txt)
 
-def _parse_fasta(txt) -> dict[str, Seq]:
+def _parse_fasta(txt: str) -> dict[str, Seq]:
+    # Parse a FASTA string into a dict with the keys as the contig names and the values as the sequences.
     contigs: dict[str, Seq] = {}
     fasta_splits: list[str] = re.split('>(.*)\n', txt)[1:]
     for i in range(0, len(fasta_splits), 2):
@@ -738,7 +913,18 @@ def _parse_fasta(txt) -> dict[str, Seq]:
     return contigs
 
 class GffFile:
+    """Describes a GFF file."""
     def __init__(self, gff_file=None, fasta_file=None, postpone_validation=True, ignore_unknown_feature_types=False) -> None:
+        """Initialize a GFF file object.
+        
+        If `gff_file` is `None`, creates an empty GFF file, that can optionally be populated with sequences from `fasta_file`.
+
+        Arguments
+        gff_file -- File name of the GFF file (default `None`)
+        fasta_file -- File name of a FASTA file containing the contig sequences (default `None`)
+        postpone_validation --  Whether to postpone running GFF validation, will run validation directly after loading if `False` (default `True`).
+        ignore_unknown_feature_types -- Raise an exception if an unknown feature type is encountered if `False` (default `False`).
+        """
         if fasta_file is not None:
             self._contigs: dict[str, Seq] = _read_fasta_file(fasta_file)
         else:
@@ -753,34 +939,48 @@ class GffFile:
             self.validate()
     
     def _generate_seqregs(self) -> dict[str, SequenceRegion]:
+        # Generate empty sequence regions from the given contigs.
         return {name: SequenceRegion(name, 1, len(sequence)+1, sequence) for name, sequence in self._contigs.items()}
 
     def _read_gff_file(self, filename, ignore_unknown_feature_types) -> None:
+        # Parse GFF file
         header_lines: list[str] = []
         GFF_lines: list[str] = []
 
+        # Read GFF file line by line
         with open(filename, 'r') as f:
-            f: typing.TextIO        
+            f: typing.TextIO
+            # Read in header (until we encounter a line not starting with "##")
             for line in f:
                 if not line.startswith('##'):
                     break
                 header_lines.append(line)
+
+            # Return to the start of the file.
             f.seek(0)
             read_fasta: bool = False
             for line_nr, line in enumerate(f):
+                # If we encounter a line starting with "##FASTA", stop reading GFF lines and treat the rest as a FASTA file.
                 if line.startswith('##FASTA'):
                     read_fasta = True
                     break
+                # Ignore comments
                 if line.startswith('#'):
                     continue
+                # Record line
                 GFF_lines.append((line_nr, line))
             if read_fasta:
                 if len(self._contigs) > 0:
+                    # If we already read in an external FASTA, use that, but warn the user.
                     logger.warning('External FASTA file provided, but GFF contains FASTA section. Using the external data.')
                 else:
+                    # If the file has a FASTA portion at the end, use that.
                     self._contigs.update(_parse_fasta(f.read()))
 
+        # New sequence regions
         seqregs: dict[str, SequenceRegion] = self._generate_seqregs()
+        # The header contains info on the sequence regions (among other things, but we only use the sequence region info)
+        # This is formatted this way: "##sequence-region <name> <start> <stop>"
         for line in header_lines:
             split: list[str] = re.split('\s+', line)
             if split[0] == '##sequence-region':
@@ -795,24 +995,35 @@ class GffFile:
                 else:
                     seqregs[split[1]] = SequenceRegion(split[1], int(split[2]), int(split[3]), None)
 
+        # Parse the body of the GFF
         for line_nr, line in GFF_lines:
+            # Each line is formatted this way:
+            # <sequence ID> <source> <type> <start> <end> <score> <strand> <phase> <attributes>
+            # We split the line on whitespace, and make sure that we have nine components
             splits: list[str] = re.split('\s+', line[:-1])
             if len(splits) < 9:
                 raise ValueError(f'Malformatted line on line nr {line_nr}.')
             elif len(splits) > 9:
+                # We need to treat the last entry in a special way, because the attributes can contain whitespace.
                 last_entry: str = ' '.join(splits[8:])
                 splits = list(splits[:8]) + [last_entry]
+            
             _: str
             seq_id: str
             entry_type: str
             seq_id, _, entry_type, start, end, _, _, _, _ = splits
+
             try:
                 seqreg = seqregs[seq_id]
             except KeyError:
                 raise ValueError(f'Unknown sequence region ID on line nr {line_nr}.')
+            
             try:
+                # Generate a new node for the GFF entry.
+                # This raises a StopIteration exception if it finds a node type it doesn't know.
                 node: Node = next(subclass for subclass in Node.__subclasses__() if subclass.type == entry_type)(line_nr+1, seqreg, *splits[1:])
             except StopIteration as e:
+                # Produce a GenericNode if instructed to ignore unknown feature types, otherwise raise an Exception.
                 if ignore_unknown_feature_types:
                     node: Node = GenericNode(line_nr+1, seqreg, *splits[1:])
                 else:
@@ -823,11 +1034,17 @@ class GffFile:
         self.sequence_regions = seqregs
 
     def validate(self) -> None:
+        """Validate the GFF file, its sequence regions and the contained feature nodes."""
         for seqreg in self.sequence_regions.values():
             seqreg.validate()
 
     def fix_issues(self) -> None:
+        """Recursively fix any issues found during validation that can be fixed automatically.
+        
+        This needs to be run after `GFFFile.validate`, otherwise no issues have been populated.
+        """
         def fix_issues_recursively(node) -> None:
+            # Issues are fixed depth-first.
             for child in node.children:
                 fix_issues_recursively(child)
             while node.issues:
@@ -839,19 +1056,21 @@ class GffFile:
                 except NotImplementedError:
                     logger.debug(f'{issue.node.attributes["ID"]}: Unable to fix.')
 
+        # Go through all sequence regions and run fixes.
         for seqreg in self.sequence_regions.values():
             for gene in [entry for entry in seqreg.node_registry.values() if entry.type == 'gene']:
                 while True:
                     try:
                         fix_issues_recursively(gene)
                     except RevalidationNecessary:
+                        # On a gene-level, revalidation after a fix might be necessary.
                         logger.debug(f'{gene.attributes["ID"]}: Revalidating after fix')
                         gene._validate()
                         continue
                     break
 
-
     def gather_issues(self) -> dict[str, list[Issue]]:
+        """Collect issues from all feature nodes. Returns a dict with the issue type as key and a list of occurrences as the value."""
         issues: defaultdict[str, list[Issue]] = defaultdict(list)
         for seqreg in self.sequence_regions.values():
             seqreg.validate()
@@ -861,6 +1080,7 @@ class GffFile:
         return dict(issues)
 
     def validation_report(self) -> str:
+        """Return a report on issues found as a string."""
         issues: dict[str, list[Issue]] = self.gather_issues()
     
         report: str = 'Issue summary:\n'
@@ -878,6 +1098,7 @@ class GffFile:
         return report
     
     def merge(self, gff: GffFile):
+        """Merge another GFF file into this one."""
         srnames_this: set[str] = set(self.sequence_regions)
         srnames_other: set[str] = set(gff.sequence_regions)
         if srnames_this.intersection(srnames_other):
@@ -886,6 +1107,7 @@ class GffFile:
         self.sequence_regions.update(gff.sequence_regions)
 
     def __getitem__(self, key: str) -> Node:
+        """Return the feature node with the given ID."""
         for seqreg in self.sequence_regions.values():
             try:
                 return seqreg.node_registry[key]
@@ -894,6 +1116,7 @@ class GffFile:
         raise KeyError(f'No feature with ID "{key}" found.')
 
     def _sequence_region_header(self, skip_empty_sequences=True) -> str:
+        # Construct the header lines for all sequence regions
         header: str = ''
         for seqreg in self.sequence_regions.values():
             if skip_empty_sequences and (len(seqreg.node_registry) == 0):
@@ -902,6 +1125,7 @@ class GffFile:
         return header
 
     def __str__(self) -> str:
+        """Format and return the GFF file as a string."""
         header: str = '''##gff-version    3
 ##feature-ontology  so.obo
 ##attribute-ontology    gff3_attributes.obo
@@ -914,6 +1138,12 @@ class GffFile:
         return header + body
 
     def save(self, filename, include_sequences=False) -> None:
+        """Save the GFF file.
+        
+        Arguments
+        filename -- Name of the output file
+        include_sequences -- Whether to append the sequences as a FASTA portion (default `False)
+        """
         with open(filename, 'w') as f:
             f.write(str(self))
             if include_sequences:
