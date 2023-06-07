@@ -96,6 +96,11 @@ CODON_TRANSLATION_TABLE: dict[str, str] = {
 for stop_codon in STOP_CODONS:
     CODON_TRANSLATION_TABLE[stop_codon] = '*'
 
+EXTRA_FEATURE_TYPES = {
+    'protein_coding_gene': 'gene',
+    'ncRNA_gene': 'gene',
+}
+
 logger: logging.Logger = logging.getLogger('parseGFF3')
 
 class RevalidationNecessary(Exception):
@@ -322,6 +327,7 @@ class Node:
             strand: str,
             phase: int | str,
             attributes: str,
+            extra_feature_type=None,
             *args, **kwargs) -> None:
         """Initialise a GFF Node
         
@@ -363,6 +369,9 @@ class Node:
             self.attributes: dict = dict(item.split('=') for item in attributes.split(';'))
         except ValueError:
             raise ValueError(f'Invalid attributes entry on line nr {self.line_nr}.')
+
+        # Allow for GFF-spec-subverting special feature types, such as "protein_coding_gene"
+        self.extra_feature_type = extra_feature_type
 
         self.children: list[Node] = []
         self.parents: list[Node] = []
@@ -430,13 +439,17 @@ class Node:
 
     def __str__(self) -> str:
         attr_str: str = ';'.join([f'{key}={value}' for key, value in self.attributes.items()])
-        entries: list[str] = [f'{self.sequence_region.name}\t{self.source}\t{self.type}\t{self.start}\t{self.end}\t{self.score}\t{self.strand}\t{self.phase}\t{attr_str}']
+        if self.extra_feature_type is None:
+            feature_type = self.type
+        else:
+            feature_type = self.extra_feature_type
+        entries: list[str] = [f'{self.sequence_region.name}\t{self.source}\t{feature_type}\t{self.start}\t{self.end}\t{self.score}\t{self.strand}\t{self.phase}\t{attr_str}']
         for child in self.children:
             entries.append(str(child))
         return '\n'.join(entries)
     
     def __repr__(self) -> str:
-        return f'{self.type} {self.strand}[{self.start}, {self.end}]'
+        return f'{self.type if self.extra_feature_type is None else self.extra_feature_type} {self.strand}[{self.start}, {self.end}]'
 
     def apply_recursively(self, func: typing.Callable[[Node], typing.Any]):
         """Apply the given function recursively to the node and its children.
@@ -1018,10 +1031,19 @@ class GffFile:
             except KeyError:
                 raise ValueError(f'Unknown sequence region ID on line nr {line_nr}.')
             
+            # There are GFF files with non-spec feature types, such as "protein_coding_gene".
+            # We treat them as a gene feature, but remember the non-standard type for saving.
+            # TODO: We should treat this as a validation / fix issue.
+            if entry_type in EXTRA_FEATURE_TYPES:
+                extra_feature_type = entry_type
+                entry_type = EXTRA_FEATURE_TYPES[entry_type]
+            else:
+                extra_feature_type = None
+            
             try:
                 # Generate a new node for the GFF entry.
                 # This raises a StopIteration exception if it finds a node type it doesn't know.
-                node: Node = next(subclass for subclass in Node.__subclasses__() if subclass.type == entry_type)(line_nr+1, seqreg, *splits[1:])
+                node: Node = next(subclass for subclass in Node.__subclasses__() if subclass.type == entry_type)(line_nr+1, seqreg, *splits[1:], extra_feature_type=extra_feature_type)
             except StopIteration as e:
                 # Produce a GenericNode if instructed to ignore unknown feature types, otherwise raise an Exception.
                 if ignore_unknown_feature_types:
