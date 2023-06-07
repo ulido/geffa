@@ -327,7 +327,7 @@ class Node:
             strand: str,
             phase: int | str,
             attributes: str,
-            extra_feature_type=None,
+            extra_feature_type: str | None = None,
             *args, **kwargs) -> None:
         """Initialise a GFF Node
         
@@ -371,7 +371,7 @@ class Node:
             raise ValueError(f'Invalid attributes entry on line nr {self.line_nr}.')
 
         # Allow for GFF-spec-subverting special feature types, such as "protein_coding_gene"
-        self.extra_feature_type = extra_feature_type
+        self.extra_feature_type: str | None = extra_feature_type
 
         self.children: list[Node] = []
         self.parents: list[Node] = []
@@ -661,6 +661,45 @@ class RRNANode(Node):
         for p in self.parents:
             if p.type != 'gene':
                 raise ValueError('rRNA parent needs to be gene')
+
+class SnRNANode(Node):
+    """Node type describing a small nuclear RNA feature."""
+    type: str = 'snRNA'
+    toplevel: bool = False
+    def validate(self) -> None:
+        """Validate the snRNA feature."""
+        if self.phase != '.':
+            raise ValueError('Phase needs to be "." for snRNA.')
+
+        for p in self.parents:
+            if p.type != 'gene':
+                raise ValueError('snRNA parent needs to be gene')
+            
+class SnoRNANode(Node):
+    """Node type describing a small nucleolar RNA feature."""
+    type: str = 'snoRNA'
+    toplevel: bool = False
+    def validate(self) -> None:
+        """Validate the snoRNA feature."""
+        if self.phase != '.':
+            raise ValueError('Phase needs to be "." for snoRNA.')
+
+        for p in self.parents:
+            if p.type != 'gene':
+                raise ValueError('snoRNA parent needs to be gene')
+
+class ScRNANode(Node):
+    """Node type describing a small conditional RNA feature."""
+    type: str = 'scRNA'
+    toplevel: bool = False
+    def validate(self) -> None:
+        """Validate the scRNA feature."""
+        if self.phase != '.':
+            raise ValueError('Phase needs to be "." for scRNA.')
+
+        for p in self.parents:
+            if p.type != 'gene':
+                raise ValueError('scRNA parent needs to be gene')
 
 class TRNANode(Node):
     """Node type describing a t-RNA feature."""
@@ -1043,7 +1082,7 @@ class GffFile:
             try:
                 # Generate a new node for the GFF entry.
                 # This raises a StopIteration exception if it finds a node type it doesn't know.
-                node: Node = next(subclass for subclass in Node.__subclasses__() if subclass.type == entry_type)(line_nr+1, seqreg, *splits[1:], extra_feature_type=extra_feature_type)
+                node: Node = next(subclass for subclass in Node.__subclasses__() if subclass.type == entry_type)(line_nr+1, seqreg, splits[1], entry_type, *splits[3:], extra_feature_type=extra_feature_type)
             except StopIteration as e:
                 # Produce a GenericNode if instructed to ignore unknown feature types, otherwise raise an Exception.
                 if ignore_unknown_feature_types:
