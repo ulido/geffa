@@ -803,6 +803,8 @@ class SLASNode(Node):
         for p in self.parents:
             if p.type != 'gene':
                 raise ValueError('SLAS parent needs to be gene')
+        if len(self) != 2:
+            raise ValueError('SLAS feature needs to be of length 2')
 
 class PASNode(Node):
     """Node type describing a poly-adenylation site."""
@@ -813,6 +815,8 @@ class PASNode(Node):
         for p in self.parents:
             if p.type != 'gene':
                 raise ValueError('PAS parent needs to be gene')
+        if len(self) != 1:
+            raise ValueError('PAS feature needs to be of length 1')
 
 class STARTNode(Node):
     """Node type describing a start codon site."""
