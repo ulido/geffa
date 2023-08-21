@@ -499,6 +499,10 @@ class GenericNode(Node):
         self.type = entry_type
         super().__init__(line_nr, sequence_region, source, entry_type, start, end, score, strand, phase, attributes, *args, **kwargs)
 
+    def validate(self) -> None:
+        """Stub function, cannot actually validate a generic node since we don't know anything about it."""
+        pass
+
 class GeneNode(Node):
     """Node type describing a gene feature."""
     type: str = 'gene'
