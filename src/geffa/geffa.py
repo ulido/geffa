@@ -945,11 +945,11 @@ class SequenceRegion:
             # NOTE: This works well if we don't have overlapping features. If we do, then the behavior is somewhat undefined!
             nodes = nodes[::-1]
         if direction == 'forward' or direction == 'both':
-            idx_fwd: int = bisect.bisect_right(nodes, node, key=lambda x: x.start)
+            idx_fwd: int = bisect.bisect_right(nodes, node.end, key=lambda x: x.start)
         else:
             idx_fwd = None
         if direction == 'backward' or direction == 'both':
-            idx_back: int = bisect.bisect_left(nodes, node, key=lambda x: x.start)
+            idx_back: int = bisect.bisect_left(nodes, node.start, key=lambda x: x.start)
         else:
             idx_back = None
         return sorted([nodes[i] for i in (idx_fwd, idx_back) if i is not None], key=lambda x: abs(node.start - x.start))
