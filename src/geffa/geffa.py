@@ -944,15 +944,18 @@ class SequenceRegion:
         if node.strand == '-':
             # NOTE: This works well if we don't have overlapping features. If we do, then the behavior is somewhat undefined!
             nodes = nodes[::-1]
+        found_nodes = []
         if direction == 'forward' or direction == 'both':
             idx_fwd: int = bisect.bisect_right(nodes, node.end, key=lambda x: x.start)
-        else:
-            idx_fwd = None
+            if idx_fwd < len(nodes):  # No node found otherwise
+                nodes.append(nodes[idx_fwd])
         if direction == 'backward' or direction == 'both':
             idx_back: int = bisect.bisect_left(nodes, node.start, key=lambda x: x.start)
-        else:
-            idx_back = None
-        return sorted([nodes[i] for i in (idx_fwd, idx_back) if i is not None], key=lambda x: abs(node.start - x.start))
+            if idx_back > 0:  # No node found otherwise
+                nodes.append(node[idx_back])
+        if found_nodes:
+            return sorted(found_nodes, key=lambda x: abs(node.start - x.start))
+        return []
 
     def __str__(self) -> str:
         return f'##sequence-region\t{self.name}\t{self.start}\t{self.end}'
