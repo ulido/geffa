@@ -1,5 +1,4 @@
 from __future__ import annotations
-from ast import Str
 import re
 from collections import defaultdict
 import bisect
@@ -7,7 +6,7 @@ import logging
 import textwrap
 import pathlib
 
-import typing
+from typing import Literal, Callable, Any, Pattern, TextIO
 
 # Translation table helps to create the reverse complement
 _TRANSLATION_TABLE: dict[int, int | None] = str.maketrans('ACTG', 'TGAC')
@@ -392,6 +391,13 @@ class Node:
 
         self.sequence_region.add_node(self)
 
+    def add_parent(self, parent: Node):
+        if self.strand != parent.strand:
+            raise ValueError(f"Strand is different between parent and child.")
+        self.parents.append(parent)
+        parent.children.append(self)
+        self.attributes['Parent'] = ','.join([p.attributes['ID'] for p in self.parents])
+
     @property
     def sequence(self) -> Seq | None:
         """The nucleotide sequence of the feature (if the sequence region's sequence is available, otherwise `None`)."""
@@ -451,7 +457,7 @@ class Node:
     def __repr__(self) -> str:
         return f'{self.type if self.extra_feature_type is None else self.extra_feature_type} {self.strand}[{self.start}, {self.end}]'
 
-    def apply_recursively(self, func: typing.Callable[[Node], typing.Any]):
+    def apply_recursively(self, func: Callable[[Node], Any]):
         """Apply the given function recursively to the node and its children.
         
         This is done depth-first, meaning any children are iterated over first.
@@ -476,7 +482,7 @@ class Node:
         if new_end is not None:
             self.end = max(self.end, new_end)
 
-    def to_dict(self) -> dict[str, typing.Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Returns a `dict` containing the feature parameters."""
         return {
             'type': self.type,
@@ -839,7 +845,7 @@ class STOPNode(Node):
         pass
 
 # Regular expression to check for gaps.
-_gap_re: typing.Pattern[str] = re.compile('NNN+')  # Gaps are at least 3 Ns
+_gap_re: Pattern[str] = re.compile('NNN+')  # Gaps are at least 3 Ns
 class SequenceRegion:
     """Describes a sequence region (or contig)."""
     def __init__(self, name: str, start: int, end: int, sequence=None) -> None:
@@ -929,33 +935,41 @@ class SequenceRegion:
             new_seq: str = seq[:start-1] + seq[end+1:]
             self.sequence = Seq(new_seq)
 
-    def closest_node_of_type(self, node: Node, node_types: list[str] | None, direction: str = 'both') -> list[Node]:
+    def closest_node_of_type(self, node: Node, node_types: list[str] | None, direction: str = 'both', strand: Literal['-'] | Literal['+'] | None = None ) -> list[Node]:
         '''Return the closest node of the specified type(s) in the specified direction.
         Please note that the direction is reversed if the given node's strand is '-'.
         '''
-        type_filter_func: typing.Callable[[Node], bool] = lambda x: True
+        type_filter_func: Callable[[Node], bool] = lambda x: True
         if node_types is not None:
             if not isinstance(node_types, list):
                 node_types: list[str] = [node_types]
-            type_filter_func = lambda x: x.type in node_types
+            if strand is not None:
+                type_filter_func = lambda x: x.type in node_types and x.strand == strand
+            else:
+                type_filter_func = lambda x: x.type in node_types
+        elif strand is not None:
+            type_filter_func = lambda x: x.strand == strand
         
         # Get a list of all nodes of the given type(s) in the sequence region, sorted by the start cordinate.
-        nodes: list[Node] = sorted([feature for feature in self.node_registry.values() if type_filter_func(feature)], key=lambda x: x.start)
+        if node.strand == '+':
+            nodes: list[Node] = sorted([feature for feature in self.node_registry.values() if type_filter_func(feature) and feature.start >= node.end], key=lambda x: x.start)
+        elif node.strand == '-':
+            nodes: list[Node] = sorted([feature for feature in self.node_registry.values() if type_filter_func(feature) and feature.end <= node.end], key=lambda x: x.start)
+
         if node.strand == '-':
             # NOTE: This works well if we don't have overlapping features. If we do, then the behavior is somewhat undefined!
-            nodes = nodes[::-1]
+            pass
         found_nodes = []
         if direction == 'forward' or direction == 'both':
             idx_fwd: int = bisect.bisect_right(nodes, node.end, key=lambda x: x.start)
             if idx_fwd < len(nodes):  # No node found otherwise
-                nodes.append(nodes[idx_fwd])
+                found_nodes.append(nodes[idx_fwd])
         if direction == 'backward' or direction == 'both':
-            idx_back: int = bisect.bisect_left(nodes, node.start, key=lambda x: x.start)
-            if idx_back > 0:  # No node found otherwise
-                nodes.append(node[idx_back])
-        if found_nodes:
-            return sorted(found_nodes, key=lambda x: abs(node.start - x.start))
-        return []
+            idx_back: int = bisect.bisect_left(nodes[::-1], node.start, key=lambda x: x.end)
+            if idx_back < len(nodes):  # No node found otherwise
+                #print(len(nodes), idx_back)
+                found_nodes.append(nodes[idx_back])
+        return sorted(found_nodes, key=lambda x: abs(node.start - x.start))
 
     def __str__(self) -> str:
         return f'##sequence-region\t{self.name}\t{self.start}\t{self.end}'
@@ -1012,7 +1026,7 @@ class GffFile:
 
         # Read GFF file line by line
         with open(filename, 'r') as f:
-            f: typing.TextIO
+            f: TextIO
             # Read in header (until we encounter a line not starting with "##")
             for line in f:
                 if not line.startswith('##'):
