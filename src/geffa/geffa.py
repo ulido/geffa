@@ -314,6 +314,8 @@ class CDSOverlap(Issue):
 
 class Node:
     """Base class of a GFF Node"""
+    type: str
+
     def __init__(
             self,
             line_nr: int,
@@ -494,6 +496,12 @@ class Node:
             'attributes': self.attributes,
             'sequence_region': self.sequence_region.name,
         }
+    
+    def has_child_of_type(self, type: str):
+        for child in self.children:
+            if child.type == type:
+                return True
+        return False
 
 class GenericNode(Node):
     """A catch-all node type used if `ignore_unknown_feature_types=True`."""
