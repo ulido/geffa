@@ -6,7 +6,7 @@ import logging
 import textwrap
 import pathlib
 
-from typing import Literal, Callable, Any, Pattern, TextIO
+from typing import Literal, Callable, Any, Pattern, TextIO, Type, TypeVar, cast
 
 # Translation table helps to create the reverse complement
 _TRANSLATION_TABLE: dict[int, int | None] = str.maketrans('ACTG', 'TGAC')
@@ -314,7 +314,7 @@ class CDSOverlap(Issue):
 
 class Node:
     """Base class of a GFF Node"""
-    type: str
+    type: str = "__node__"
 
     def __init__(
             self,
@@ -367,7 +367,7 @@ class Node:
         self.strand = strand
         self.phase: str | int = phase if phase == '.' else int(phase)
         try:
-            self.attributes: dict = dict(item.split('=') for item in attributes.split(';'))
+            self.attributes: dict[str, str] = dict(item.split('=') for item in attributes.split(';'))
         except ValueError:
             raise ValueError(f'Invalid attributes entry on line nr {self.line_nr}.')
 
@@ -497,11 +497,20 @@ class Node:
             'sequence_region': self.sequence_region.name,
         }
     
+    def children_of_type(self, node_type: type[NodeType]) -> list[NodeType]:
+        children = cast(list[NodeType], self.children)
+        return [
+            node for node in children
+            if node.type == node_type.type
+        ]
+
     def has_child_of_type(self, type: str):
         for child in self.children:
             if child.type == type:
                 return True
         return False
+
+NodeType = TypeVar('NodeType', bound=Node)
 
 class GenericNode(Node):
     """A catch-all node type used if `ignore_unknown_feature_types=True`."""
@@ -614,7 +623,7 @@ class MRNANode(Node):
             phases.append((phases[-1] + 3-((CDSs[i].end - CDSs[i].start + 1) % 3)) % 3)
         return phases
 
-    def CDS_children(self) -> list[Node]:
+    def CDS_children(self) -> list[CDSNode]:
         """Returns a sorted list of CDS child features."""
         CDSs: list[Node] = sorted([child for child in self.children if child.type == 'CDS'], key=lambda c: c.start)
         if self.strand == '-':
@@ -981,6 +990,13 @@ class SequenceRegion:
 
     def __str__(self) -> str:
         return f'##sequence-region\t{self.name}\t{self.start}\t{self.end}'
+
+    def nodes_of_type(self, node_type: type[NodeType]) -> list[NodeType]:
+        return [
+            node for node in self.node_registry.values()
+            if node.type == node_type.type
+        ]
+
 
 def _read_fasta_file(filename: pathlib.Path | str) -> dict[str, Seq]:
     # Open and read the given FASTA file
