@@ -1,0 +1,25 @@
+site_name: geffa - handle GFF files
+site_url: https://ulido.github.io/geffa
+
+theme:
+  name: "material"
+
+plugins:
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            docstring_style: google
+
+markdown_extensions:
+  - pymdownx.snippets
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+
+nav:
+  - index.md
+  - reference.md

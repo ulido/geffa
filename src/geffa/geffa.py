@@ -403,15 +403,15 @@ class Node:
             *args, **kwargs) -> None:
         """Initialise a GFF Node
 
-        Arguments:
-        line_nr -- the line number the `Node` is defined at in the GFF file
-        sequence_region -- the `SequenceRegion` the `Node` belongs to
-        source -- the source specifier from the line in the GFF file
-        entry_type -- the type of `Node`
-        start -- the start coordinate of the `Node`
-        end -- the end coordinate of the `Node`
-        score -- the score value of the `Node`
-        phase -- the phase value of the `Node`
+        Args:
+            line_nr: The line number the `Node` is defined at in the GFF file
+            sequence_region: The `SequenceRegion` the `Node` belongs to.
+            source: The source specifier from the line in the GFF file.
+            entry_type: The type of `Node`.
+            start: The start coordinate of the `Node`.
+            end: The end coordinate of the `Node`.
+            score: The score value of the `Node`.
+            phase: The phase value of the `Node`.
         """
         start: int = int(start)
         end: int = int(end)
@@ -557,24 +557,28 @@ class Node:
 
         This is done depth-first, meaning any children are iterated over first.
 
-        Arguments
-        func -- function to apply (needs to take the `Node` as a single
-            argument, return is ignored)
+        Args:
+            func: Function to apply (needs to take the `Node` as a single
+                argument, return is ignored).
         """
         for child in self.children:
             child.apply_recursively(func)
         return func(self)
 
-    def extend_coordinates(self, new_start=None, new_end=None) -> None:
+    def extend_coordinates(
+        self,
+        new_start: int | None = None,
+        new_end: int | None = None
+    ):
         """Extend the start and stop coordinates of the feature to the given
         coordinates.
 
         Crucially, this only allows extending, a feature cannot be shrunk this
         way (i.e. the new start cannot be to the right of the original).
 
-        Arguments
-        new_start -- new start coordinate (default `None`)
-        new_end -- new end coordintate (default `None`)
+        Args:
+            new_start: New start coordinate (default `None`).
+            new_end: New end coordintate (default `None`).
         """
         if new_start is not None:
             self.start = min(self.start, new_start)
@@ -595,13 +599,32 @@ class Node:
         }
 
     def children_of_type(self, node_type: type[NodeType]) -> list[NodeType]:
+        """Return a list of all direct children of the given type.
+
+        Args:
+            node_type: Type of the nodes to be returned, e.g. `MRNANode`, or
+                `None` in which case all nodes in the sequence region will be
+                returned. Default `None`.
+
+        Returns:
+            A list containing all direct child nodes of the given type.
+        """
         children = cast(list[NodeType], self.children)
         return [
             node for node in children
             if node.type == node_type.type
         ]
 
-    def has_child_of_type(self, type: str):
+    def has_child_of_type(self, type: str) -> bool:
+        """Check whether this node as a child of the given node.
+
+        Args:
+            type: String describing the type of node to check for
+                (i.e. "mRNA").
+
+        Returns:
+            Whether a child of the given type exists.
+        """
         for child in self.children:
             if child.type == type:
                 return True
@@ -668,15 +691,15 @@ class GeneNode(Node):
             raise ValueError(
                 '"Parent" attribute does not make sense for gene.')
 
-    def mark_as_pseudo(self, reason='unknown') -> None:
+    def mark_as_pseudo(self, reason: str = 'unknown') -> None:
         """This marks the gene feature as a pseudo gene.
 
         It will delete any CDS, 3'UTR and 5'UTR features found in any mRNA
         child features.
 
-        Arguments
-        reason -- text describing the reason for marking as a pseudogene
-            (default "unknown")
+        Args:
+            reason: Text describing the reason for marking as a pseudogene
+                (default "unknown").
         """
         self.attributes['pseudogene'] = reason
         for child in self.children:
@@ -806,7 +829,11 @@ class MRNANode(Node):
                 protein_sequence += 'X'
         return protein_sequence
 
-    def extend_coordinates(self, new_start=None, new_end=None) -> None:
+    def extend_coordinates(
+        self,
+        new_start: int | None = None,
+        new_end: int | None = None
+    ):
         """Extend the start and stop coordinates of the feature to the given
         coordinates.
 
@@ -814,9 +841,9 @@ class MRNANode(Node):
         way (i.e. the new start cannot be to the right of the original).
         It also extends the parent's coordinates.
 
-        Arguments
-        new_start -- new start coordinate (default `None`)
-        new_end -- new end coordintate (default `None`)
+        Args:
+            new_start: New start coordinate (default `None`).
+            new_end: New end coordintate (default `None`).
         """
         super().extend_coordinates(new_start, new_end)
         self.parents[0].extend_coordinates(new_start, new_end)
@@ -926,7 +953,11 @@ class ExonNode(Node):
             if p.type not in ['mRNA', 'ncRNA', 'rRNA', 'tRNA']:
                 raise ValueError('Exon parent needs to be an RNA')
 
-    def extend_coordinates(self, new_start=None, new_end=None) -> None:
+    def extend_coordinates(
+        self,
+        new_start: int | None = None,
+        new_end: int | None = None
+    ):
         """Extend the start and stop coordinates of the feature to the given
         coordinates.
 
@@ -934,9 +965,9 @@ class ExonNode(Node):
         way (i.e. the new start cannot be to the right of the original).
         It also extends the parent's coordinates.
 
-        Arguments
-        new_start -- new start coordinate (default `None`)
-        new_end -- new end coordintate (default `None`)
+        Args:
+            new_start: New start coordinate (default `None`).
+            new_end: New end coordintate (default `None`).
         """
         super().extend_coordinates(new_start, new_end)
         self.parents[0].extend_coordinates(new_start, new_end)
@@ -988,7 +1019,11 @@ class CDSNode(Node):
         if self.parents[0].type != 'mRNA':
             raise ValueError('CDS parent needs to be mRNA')
 
-    def extend_coordinates(self, new_start=None, new_end=None) -> None:
+    def extend_coordinates(
+        self,
+        new_start: int | None = None,
+        new_end: int | None = None
+    ):
         """Extend the start and stop coordinates of the feature to the given
         coordinates.
 
@@ -996,9 +1031,9 @@ class CDSNode(Node):
         way (i.e. the new start cannot be to the right of the original).
         It also extends the parent's coordinates.
 
-        Arguments
-        new_start -- new start coordinate (default `None`)
-        new_end -- new end coordintate (default `None`)
+        Args:
+            new_start: New start coordinate (default `None`).
+            new_end: New end coordintate (default `None`).
         """
         super().extend_coordinates(new_start, new_end)
         self.parents[0].extend_coordinates(new_start, new_end)
@@ -1060,14 +1095,21 @@ class SequenceRegion:
     # Regular expression to check for gaps.
     _gap_re: Pattern[str] = re.compile('NNN+')  # Gaps are at least 3 Ns
 
-    def __init__(self, name: str, start: int, end: int, sequence=None) -> None:
+    def __init__(
+        self,
+        name: str,
+        start: int,
+        end: int,
+        sequence: str | None = None
+    ):
         """Initialize the sequence region.
 
-        Arguments
-        name -- Name of the contig (no spaces allowed)
-        start -- Start coordinate of the contig.
-        end -- End coordinate of the contig.
-        sequence -- Nucleotide sequence of the contig."""
+        Args:
+            name: Name of the contig (no spaces allowed).
+            start: Start coordinate of the contig.
+            end: End coordinate of the contig.
+            sequence: Nucleotide sequence of the contig.
+        """
         if (not issubclass(type(name), str)) or (name == '') or (' ' in name):
             raise ValueError('Name needs to be a valid string without spaces')
         if start > end:
@@ -1115,14 +1157,19 @@ class SequenceRegion:
 
         self.node_registry[node.attributes["ID"]] = node
 
-    def trim_sequence(self, start, end, delete_overlapping_features=True):
+    def trim_sequence(
+        self,
+        start: int,
+        end: int,
+        delete_overlapping_features: bool = True,
+    ):
         """Trim the sequence region to the given coordinates.
 
-        Arguments
-        start -- Trim to this start position
-        end -- Trim to this end position
-        delete_overlapping_features -- Allow deletion of features that overlap
-            the new sequence region boundaries.
+        Args:
+            start: Trim to this start position.
+            end: Trim to this end position.
+            delete_overlapping_features: Allow deletion of features that
+                overlap the new sequence region boundaries.
         """
         logger.debug(f'{self.name}: Trimming sequence region.')
         overlapping_features: list[Node] = [
@@ -1161,14 +1208,37 @@ class SequenceRegion:
     def closest_node_of_type(
         self,
         node: Node,
-        node_types: list[str] | None,
-        direction: str = 'both',
-        strand: Literal['-'] | Literal['+'] | None = None
+        node_types: list[str] | None = None,
+        direction: Literal['forward', 'reverse', 'both'] = 'both',
+        strand: Literal['-', '+'] | None = None
     ) -> list[Node]:
-        '''Return the closest node of the specified type(s) in the specified
-        direction. Please note that the direction is reversed if the given
-        node's strand is '-'.
+        '''Return the node closest to the given `node` of the specified
+        type(s) in the specified direction. Please note that the direction is
+        reversed if the given node's strand is '-'.
+
+        For example, to find the CDS that's closest to the given SLAS node:
+
+        ```python
+        closest_cds = sequence_region.closest_node_of_type(
+            slas_node,
+            ["CDS"],
+            "forward"
+        )
+        ```
+
+        Args:
+            node: The node / feature for which we want to find the closest
+                match.
+            node_types: The list of node types we allow in the results. Can be
+                `None` in which case any node type is allowed. Default `None`.
+            direction: Which stranded direction to search for (i.e. forward on
+                the - strand will search towards the start of the sequence
+                region). Default "both".
+            strand: Only find nodes on the given strand. Can be `None` in
+                which case the strand is not used for filtering.
+                Default `None`.
         '''
+
         type_filter_func: Callable[[Node], bool] = lambda x: True
         if node_types is not None:
             if not isinstance(node_types, list):
@@ -1189,7 +1259,7 @@ class SequenceRegion:
                 [
                     feature for feature in self.node_registry.values()
                     if type_filter_func(feature) and feature.start >= node.end
-                ],
+                    ],
                 key=lambda x: x.start
             )
         elif node.strand == '-':
@@ -1221,7 +1291,34 @@ class SequenceRegion:
     def __str__(self) -> str:
         return f'##sequence-region\t{self.name}\t{self.start}\t{self.end}'
 
-    def nodes_of_type(self, node_type: type[NodeType]) -> list[NodeType]:
+    def nodes_of_type(
+        self,
+        node_type: type[NodeType] | None = None,
+    ) -> list[NodeType]:
+        """Return a list of nodes of the given type within the sequence region
+        of all nodes of `node_type=None`.
+
+        For example, to get all gene features in a given sequence region, do:
+        ```python
+        from geffa.geffa import GffFile, GeneNode
+
+        gff = GffFile(filename)
+        all_genes = []
+        for sequence_region in gff.sequence_regions.values():
+            all_genes.extend(sequence_region.nodes_of_type(GeneNode))
+        ```
+
+        Args:
+            node_type: Type of the nodes to be returned, e.g. `GeneNode`, or
+                `None` in which case all nodes in the sequence region will be
+                returned. Default `None`.
+
+        Returns:
+            A list containing all nodes of the given type in the sequence
+            region.
+        """
+        if node_type is None:
+            return list(self.node_registry.values())
         return [
             node for node in self.node_registry.values()
             if node.type == node_type.type
@@ -1247,28 +1344,36 @@ def _parse_fasta(txt: str) -> dict[str, Seq]:
 
 
 class GffFile:
-    """Describes a GFF file."""
+    """Describes a GFF file.
+
+    Attributes:
+        sequence_regions: A `dict` containing the sequence regions stored
+            within the GFF file.
+    """
+
+    sequence_regions: dict[str, SequenceRegion]
+
     def __init__(
         self,
-        gff_file=None,
-        fasta_file=None,
-        postpone_validation=True,
-        ignore_unknown_feature_types=False
+        gff_file: str | None = None,
+        fasta_file: str | None = None,
+        postpone_validation: bool = True,
+        ignore_unknown_feature_types: bool = False
     ) -> None:
         """Initialize a GFF file object.
 
         If `gff_file` is `None`, creates an empty GFF file, that can
         optionally be populated with sequences from `fasta_file`.
 
-        Arguments
-        gff_file -- File name of the GFF file (default `None`)
-        fasta_file -- File name of a FASTA file containing the contig
-            sequences (default `None`)
-        postpone_validation --  Whether to postpone running GFF validation,
-            will run validation directly after loading if `False`
-            (default `True`).
-        ignore_unknown_feature_types -- Raise an exception if an unknown
-            feature type is encountered if `False` (default `False`).
+        Args:
+            gff_file: File name of the GFF file (default `None`).
+            fasta_file: File name of a FASTA file containing the contig
+                sequences (default `None`)
+            postpone_validation: Whether to postpone running GFF validation,
+                will run validation directly after loading if `False`
+                (default `True`).
+            ignore_unknown_feature_types: Raise an exception if an unknown
+                feature type is encountered if `False` (default `False`).
         """
         if fasta_file is not None:
             self._contigs = _read_fasta_file(fasta_file)
@@ -1550,13 +1655,13 @@ class GffFile:
                 body += '###\n' + str(feature) + '\n'
         return header + body
 
-    def save(self, filename, include_sequences=False) -> None:
+    def save(self, filename: str, include_sequences: bool = False):
         """Save the GFF file.
 
-        Arguments
-        filename -- Name of the output file
-        include_sequences -- Whether to append the sequences as a FASTA
-            portion (default `False)
+        Args:
+            filename: Name of the output file.
+            include_sequences: Whether to append the sequences as a FASTA
+                portion (default `False)
         """
         with open(filename, 'w') as f:
             f.write(str(self))

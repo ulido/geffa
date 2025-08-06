@@ -16,12 +16,13 @@ from geffa import GffFile
 
 gff = GffFile("annotations.gff")
 ```
-This will load the annotations contained in `annotations.gff`. If it is a combined GFF/FASTA file, it will also load the sequences for all contigs. Alternatively, to load sequences from an external FASTA file `sequences.fasta` you can do:
+This will load the annotations contained in `annotations.gff` into a [`GffFile`][geffa.geffa.GffFile] object. If it is a combined GFF/FASTA file, it will also load the sequences for all contigs. Alternatively, to load sequences from an external FASTA file `sequences.fasta` you can do:
 ```python
 gff = GffFile("annotations.gff", fasta_file="file.fasta")
 ```
 
 ### Print number of genes per sequence region:
+The [`SequenceRegion`][geffa.geffa.SequenceRegion] object can be used to access information and GFF nodes on the sequence region / contig level. All sequence regions of a GFF file are stored within the [GffFile.sequence_regions][geffa.geffa.GffFile] structure:
 ```python
 for sequence_region in gff.sequence_regions.values():
     gene_features = [feature for feature in sequence_region.node_registry.values() if feature.type == 'gene']
