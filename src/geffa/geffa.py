@@ -1,4 +1,5 @@
 from __future__ import annotations
+import itertools
 import re
 from collections import defaultdict
 import bisect
@@ -387,6 +388,8 @@ class Node:
     """Base class of a GFF Node"""
     type: str = "__node__"
 
+    unique_counter = itertools.count(1)
+
     def __init__(
             self,
             line_nr: int,
@@ -445,6 +448,16 @@ class Node:
         except ValueError:
             raise ValueError(
                 f'Invalid attributes entry on line nr {self.line_nr}.')
+        if "ID" not in self.attributes:
+            ID = f"{self.type}-{next(self.unique_counter)}"
+            if "Parent" in self.attributes:
+                parent_ID = self.attributes["Parent"].split(",")[0]
+                ID = f"{parent_ID}-{ID}"
+            self.attributes["ID"] = ID
+            logger.warning(
+                f"{self.type} node doesn't have an ID. "
+                f"Assigning the ID {ID}."
+            )
 
         # Allow for GFF-spec-subverting special feature types, such as
         # "protein_coding_gene"
