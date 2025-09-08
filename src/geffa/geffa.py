@@ -1098,8 +1098,8 @@ class SequenceRegion:
     def __init__(
         self,
         name: str,
-        start: int,
-        end: int,
+        start: int | None,
+        end: int | None,
         sequence: str | None = None
     ):
         """Initialize the sequence region.
@@ -1112,15 +1112,15 @@ class SequenceRegion:
         """
         if (not issubclass(type(name), str)) or (name == '') or (' ' in name):
             raise ValueError('Name needs to be a valid string without spaces')
-        if start > end:
+        if end is not None and start > end:
             raise ValueError('Start needs to come before end.')
         if sequence is not None:
-            if end - start + 1 != len(sequence):
+            if end is None or (end - start + 1 != len(sequence)):
                 end = start + len(sequence) - 1
 
         self.name: str = name
-        self.start: int = start
-        self.end: int = end
+        self.start = start if start is not None else 1
+        self.end = end
         self.sequence = Seq(sequence) if sequence is not None else None
         self.node_registry: dict[str, Node] = {}
 
@@ -1288,8 +1288,15 @@ class SequenceRegion:
                 found_nodes.append(nodes[idx_back])
         return sorted(found_nodes, key=lambda x: abs(node.start - x.start))
 
+    def _find_end_from_features(self):
+        return max(feature.end for feature in self.node_registry.values())
+
     def __str__(self) -> str:
-        return f'##sequence-region\t{self.name}\t{self.start}\t{self.end}'
+        end = (
+            self.end if self.end is not None
+            else self._find_end_from_features()
+        )
+        return f'##sequence-region\t{self.name}\t{self.start}\t{end}'
 
     def nodes_of_type(
         self,
@@ -1449,15 +1456,22 @@ class GffFile:
                 name, start, end = split[1:-1]
                 if name in seqregs:
                     seqreg: SequenceRegion = seqregs[name]
+                    seqreg_end = (
+                        seqreg.end if seqreg.end is not None
+                        else seqreg._find_end_from_features()
+                    )
                     if (
                         (int(start) != seqreg.start) or
-                        (int(end) != seqreg.end)
+                        (int(end) != seqreg_end)
                     ):
-                        ValueError(
+                        logger.warning(
                             'FASTA and GFF disagree on start or end of '
                             f'sequence region {name} - start {start} vs '
-                            f'{seqreg.start} and end {end} vs {seqreg.end}'
+                            f'{seqreg.start} and end {end} vs {seqreg_end}. '
+                            'Using the FASTA start and end from here on.'
                         )
+                        seqreg.start = start
+                        seqreg.end = end
                 else:
                     seqregs[split[1]] = SequenceRegion(
                         split[1], int(split[2]), int(split[3]), None)
@@ -1485,8 +1499,12 @@ class GffFile:
             try:
                 seqreg = seqregs[seq_id]
             except KeyError:
-                raise ValueError(
-                    f'Unknown sequence region ID on line nr {line_nr}.')
+                logger.warning(
+                    f'Unknown sequence region ID on line nr {line_nr}. '
+                    'Creating it.'
+                )
+                seqreg = SequenceRegion(seq_id, None, None)
+                seqregs[seq_id] = seqreg
 
             # There are GFF files with non-spec feature types, such as
             # "protein_coding_gene". We treat them as a gene feature, but
