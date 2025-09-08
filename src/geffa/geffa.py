@@ -1039,6 +1039,18 @@ class CDSNode(Node):
         self.parents[0].extend_coordinates(new_start, new_end)
 
 
+class StartCodonNode(Node):
+    """Node type describing the position of a start codon."""
+    type: str = 'start_codon'
+    toplevel: bool = False
+
+
+class StopCodonNode(Node):
+    """Node type describing the position of a stop codon."""
+    type: str = 'stop_codon'
+    toplevel: bool = False
+
+
 class SLASNode(Node):
     """Node type describing a splice leader acceptor site."""
     type: str = 'SLAS'
