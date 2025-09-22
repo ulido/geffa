@@ -102,6 +102,7 @@ for stop_codon in STOP_CODONS:
 EXTRA_FEATURE_TYPES = {
     'protein_coding_gene': 'gene',
     'ncRNA_gene': 'gene',
+    'transcript': 'mRNA',
 }
 
 logger: logging.Logger = logging.getLogger('parseGFF3')
