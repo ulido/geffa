@@ -1173,9 +1173,9 @@ class SequenceRegion:
     def add_node(self, node: Node) -> None:
         """Add a given node."""
         if node.attributes['ID'] in self.node_registry:
-            raise ValueError(
+            logger.warning(
                 f'Node with ID "{node.attributes["ID"]}" already exists in '
-                'node registry!'
+                'node registry! Discarding this node.'
             )
         if node.sequence_region != self:
             raise ValueError("Node doesn't belong to this sequence region!")
