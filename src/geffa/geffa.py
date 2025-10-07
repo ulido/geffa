@@ -391,6 +391,26 @@ class Node:
 
     unique_counter = itertools.count(1)
 
+    @property
+    def start(self):
+        return self._start
+
+    @start.setter
+    def start(self, value: int):
+        if value > self._end:
+            raise ValueError("Node start needs to come before the end.")
+        self._start = value
+
+    @property
+    def end(self):
+        return self._end
+
+    @end.setter
+    def end(self, value: int):
+        if value < self._start:
+            raise ValueError("Node end needs to come after the start.")
+        self._end = value
+
     def __init__(
             self,
             line_nr: int,
@@ -438,8 +458,8 @@ class Node:
         self.line_nr = line_nr
         self.sequence_region = sequence_region
         self.source = source
-        self.start: int = int(start)
-        self.end: int = int(end)
+        self._start: int = int(start)
+        self._end: int = int(end)
         self.score = score
         self.strand = strand
         self.phase: str | int = phase if phase == '.' else int(phase)
