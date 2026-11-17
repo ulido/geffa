@@ -1,13 +1,13 @@
 from __future__ import annotations
-import itertools
-import re
-from collections import defaultdict
-import bisect
-import logging
-import textwrap
-import pathlib
 
-from typing import Literal, Callable, Any, Pattern, TextIO, TypeVar, cast
+import bisect
+import itertools
+import logging
+import pathlib
+import re
+import textwrap
+from collections import defaultdict
+from typing import Any, Callable, Literal, Pattern, TextIO, TypeVar, cast
 
 
 # Translation table helps to create the reverse complement
@@ -738,11 +738,24 @@ class GeneNode(Node):
         self.attributes['pseudogene'] = reason
         for child in self.children:
             if child.type == 'mRNA':
+                child.type = "transcript"
                 for grandchild in list(child.children):
                     if grandchild.type in [
                         'CDS', 'three_prime_UTR', 'five_prime_UTR'
                     ]:
                         grandchild.delete()
+
+    def adjust_coordinates_to_children(self):
+        """Adjust the start and end coordinates of the feature such that it
+        exactly fits the logical children coordinates.
+        """
+
+        mRNA_children = self.children_of_type(MRNANode)
+        new_start = min(c.start for c in mRNA_children)
+        new_end = max(c.end for c in mRNA_children)
+
+        self.start = new_start
+        self.end = new_end
 
 
 class MRNANode(Node):
@@ -882,6 +895,49 @@ class MRNANode(Node):
         super().extend_coordinates(new_start, new_end)
         self.parents[0].extend_coordinates(new_start, new_end)
 
+    def adjust_coordinates_to_children(self, delete_invalid_exons=False) -> bool:
+        """Adjust the start and end coordinates of the feature such that it
+        exactly fits the logical children coordinates.
+
+        Returns a bool indicating whether the coordinates were actually
+        updated.
+        """
+
+        non_exon_children = [c for c in self.children if c.type != "exon"]
+
+        if len(non_exon_children) == 0:
+            logger.warning("mRNA %s has no non-exon child features - leaving it in place.", self.attributes["ID"])
+            return False
+
+        new_start = min(c.start for c in non_exon_children)
+        new_end = max(c.end for c in non_exon_children)
+
+        old_start = self.start
+        old_end = self.end
+
+        self.start = new_start
+        self.end = new_end
+
+        exons = self.children_of_type(ExonNode)
+        for exon in exons:
+            if exon.start == old_start:
+                try:
+                    exon.start = new_start
+                except ValueError:
+                    if delete_invalid_exons:
+                        exon.delete()
+                    else:
+                        logger.warning("Exon %s would be deleted when adjusting coordinates. This requires a manual fix.", exon.attributes["ID"])
+            if exon.end == old_end:
+                try:
+                    exon.end = new_end
+                except ValueError:
+                    if delete_invalid_exons:
+                        exon.delete()
+                    else:
+                        logger.warning("Exon %s would be deleted when adjusting coordinates. This requires a manual fix.", exon.attributes["ID"])
+
+        return (old_start != new_start) or (old_end != new_end)
 
 class NcRNANode(Node):
     """Node type describing a non-coding RNA feature."""
